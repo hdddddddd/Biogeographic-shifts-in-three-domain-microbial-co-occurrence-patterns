@@ -1,0 +1,54 @@
+### Referring to friedman's method
+### Take Bacterial data as an example
+
+### 1. Filtering OTUs by occurrence frequency (i.e., number of samples an OTU is present)
+filter_otus_from_otu_table.py -i bac_otu_table.biom -o bac_otu_table_25%.biom -s 25  ### -s number of samples*25% (OTUs that present in > 25% of samples)
+
+biom convert -i bac_otu_table_25%.biom -o bac_otu_table_25%.txt --to-tsv --header-key taxonomy
+
+
+### 2. Filtering OTUs by abundance (i.e., the total abundance of an OTU in all samples)
+### Manual filtering in excel (output file bac_otu_table_filtered.txt)
+
+
+### 3. Compute correlations
+python SparCC.py bac_otu_table_filtered.txt -i 10 --cor_file=bac_sparcc.txt > sparcc.log
+
+
+### 4. Compute bootstraps
+python MakeBootstraps.py bac_otu_table_filtered.txt -n 100 -t boot_#.txt -p bac_Resampling/
+
+
+### 5. Compute correlations based on bootstraps
+mkdir bac_Bootstraps
+for i in `seq 0 99`
+do
+python SparCC.py bac_Resampling/boot_$i.txt -i 10 -a SparCC --cor_file=bac_Bootstraps/sim_cor_$i.txt >> sparcc.log
+done
+ 
+
+### 6. Pvalue Compute p-values
+python PseudoPvals.py bac_sparcc.txt bac_Bootstraps/sim_cor_#.txt 10 -o bac_sparcc_pvals_two_sided.txt -t 'two_sided' >> sparcc.log
+
+
+### 7. Generate networks from SparCC in R
+# load R graph library igraph
+library(igraph)
+sparcc=read.table("bac_sparcc.txt",header = T,row.names = 1)
+pvals=read.table("bac_sparcc_pvals_two_sided.txt",header = TRUE, sep = "\\t")
+pvals.mat=pvals[,2:ncol(pvals)]
+
+# set p-values of 0 to a non-zero, small p-value so we can take the logarithm
+pvals.mat[pvals.mat==0]=0.000000001
+
+# convert into significance
+sig.mat=-1*log10(pvals.mat)
+
+# remove all edges with significance below 1 and sparcc below  0.6
+bac_sparcc[bac_sig.mat<1]<-0
+bac_sparcc[abs(bac_sparcc)<0.6]<-0
+sparcc=as.matrix(bac_sparcc)
+
+# convert adjacency matrix into a graph
+sparcc.graph=graph_from_adjacency_matrix(sparcc, mode = "undirected", weighted = TRUE, diag = FALSE)
+write.graph(sparcc.graph, 'bac_sparcc_0.6.gml',format = 'gml')
